@@ -1,17 +1,24 @@
 # Initial optimization comparison
 
-Measured on an Apple M2 Pro GPU using FP32, with two warmup iterations and six timed repetitions per case. The CSV contains the measurements used for the plots.
+Measured on an Apple M2 Pro using FP32, with five warmup iterations and twenty timed repetitions per case. CPU measurements use PyTorch CPU operations. GPU measurements include PyTorch MPS and custom Metal kernels. The CSV contains all measured rows.
 
-| Kernel | Size | Baseline | Optimized | Speedup | Arithmetic intensity |
-|---|---:|---:|---:|---:|---:|
-| GEMM | 128 | 0.541 ms, naive Metal | 0.469 ms, tiled Metal | 1.15× | 0.25 → 3.76 ops/byte |
-| GEMM | 256 | 0.755 ms, naive Metal | 0.638 ms, tiled Metal | 1.18× | 0.25 → 3.88 ops/byte |
-| GEMM | 512 | 0.876 ms, naive Metal | 0.579 ms, tiled Metal | 1.51× | 0.25 → 3.94 ops/byte |
-| GEMM | 1024 | 6.264 ms, naive Metal | 3.513 ms, tiled Metal | 1.78× | 0.25 → 3.97 ops/byte |
-| Fused multiply-add | 65,536 | 0.446 ms, eager PyTorch | 0.150 ms, fused Metal | 2.97× | 0.083 → 0.125 ops/byte |
-| Fused multiply-add | 262,144 | 0.484 ms, eager PyTorch | 0.162 ms, fused Metal | 2.98× | 0.083 → 0.125 ops/byte |
-| Fused multiply-add | 1,048,576 | 0.648 ms, eager PyTorch | 0.198 ms, fused Metal | 3.28× | 0.083 → 0.125 ops/byte |
+| GEMM N | Naive Metal | Tiled Metal | PyTorch MPS | PyTorch CPU | Tiled speedup over naive |
+|---:|---:|---:|---:|---:|---:|
+| 128 | 0.525 ms | 0.206 ms | 0.216 ms | 0.006 ms | 2.55× |
+| 256 | 0.257 ms | 0.203 ms | 0.213 ms | 0.030 ms | 1.27× |
+| 512 | 0.876 ms | 0.566 ms | 0.258 ms | 0.124 ms | 1.55× |
+| 1024 | 6.251 ms | 3.526 ms | 0.666 ms | 0.808 ms | 1.77× |
 
-The tiled kernel improved on the naive Metal kernel at every tested matrix size. PyTorch's optimized GEMM remained faster than both custom kernels. Fusion reduced the modeled vector traffic from six transfers per element to four and improved measured latency relative to two eager PyTorch operations. The small vector operations still include dispatch and synchronization costs, so the speedups do not isolate memory bandwidth alone.
+| Vector length | PyTorch CPU eager | PyTorch MPS eager | Fused Metal | Fused speedup over MPS eager |
+|---:|---:|---:|---:|---:|
+| 65,536 | 0.048 ms | 0.463 ms | 0.154 ms | 3.01× |
+| 262,144 | 0.091 ms | 0.493 ms | 0.167 ms | 2.95× |
+| 1,048,576 | 0.119 ms | 0.619 ms | 0.180 ms | 3.43× |
 
-The Roofline uses modeled traffic and a published 200 GB/s memory reference. Some naive GEMM points exceed that line because GPU caches can serve repeated buffer reads. These points should be discussed as evidence that the simple model does not represent off-chip traffic for every kernel. A calibrated memory Roofline would require physical memory counters or a separate cache and streaming-bandwidth characterization.
+Tiled Metal GEMM was faster than the naive Metal version at all tested sizes. PyTorch's built-in GEMM was comparable to the tiled kernel for 128 and 256, and faster at 512 and 1024. The CPU PyTorch baseline was faster than the custom Metal GEMM at 128, 256, and 512; at 1024, PyTorch MPS was fastest.
+
+The fused Metal operation was about three times faster than two eager PyTorch MPS operations in these runs. CPU eager execution was faster than both GPU approaches for the tested vector sizes. Fusion reduced modeled traffic from six transfers per element to four, raising arithmetic intensity from 0.083 to 0.125 operations/byte.
+
+The model places naive GEMM at about 0.25 operations/byte and tiled GEMM around 3.8 to 4.0 operations/byte. Tiling reuses values in threadgroup memory, reducing modeled global loads. PyTorch GEMM uses an idealized one-read-per-input estimate, so its arithmetic intensity is higher; it should not be interpreted as a measurement of PyTorch's physical memory traffic.
+
+These are initial measurements, not final performance claims. Short workloads are sensitive to timer resolution, dispatch overhead, system load, and thermal state. The Roofline uses modeled traffic and a published 200 GB/s memory reference. Some naive GEMM points exceed that line because GPU caches can serve repeated buffer reads. A calibrated memory Roofline would require physical memory counters or a separate cache and streaming-bandwidth characterization.

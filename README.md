@@ -38,7 +38,7 @@ python benchmarks/run_benchmarks.py \
   --matmul-sizes 128,256,512,1024 \
   --elementwise-sizes 65536,262144,1048576 \
   --precisions fp32 \
-  --device mps \
+  --device both \
   --warmup 2 --repeats 6 \
   --output results/optimization_comparison.csv
 ```
