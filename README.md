@@ -8,7 +8,7 @@ A microbenchmark suite for studying machine learning kernel performance on Apple
 - Elementwise addition
 - Elementwise multiplication
 
-The benchmark runner uses PyTorch CPU and MPS operations as initial baselines. Metal shader sources are in `kernels/metal`; the next implementation step is to connect custom Metal kernels to the runner so that the project compares framework baselines with kernels we implement.
+The benchmark runner compares PyTorch CPU and MPS operations with custom Metal kernels. The Metal implementation includes a naive GEMM baseline, a 16×16 tiled GEMM, and a fused elementwise multiply-add kernel.
 
 FP16 support depends on the operation and device. Unsupported combinations are reported and skipped, so use the MPS device for the primary GPU FP16 comparison.
 
@@ -24,25 +24,29 @@ python -m pip install -r requirements.txt
 
 ## Run benchmarks
 
-Run both CPU and MPS when MPS is available:
+Run CPU and MPS baselines, plus custom Metal kernels when MPS is available:
 
 ```sh
 python benchmarks/run_benchmarks.py --device both --output results/measurements.csv
 ```
 
-Select operations, sizes, and precision as needed:
+For a focused FP32 optimization comparison:
 
 ```sh
 python benchmarks/run_benchmarks.py \
-  --operations matmul,add,multiply \
-  --sizes 128,256,512,1024 \
-  --precisions fp32,fp16 \
-  --device both \
-  --output results/measurements.csv
+  --operations matmul,fused_mul_add \
+  --matmul-sizes 128,256,512,1024 \
+  --elementwise-sizes 65536,262144,1048576 \
+  --precisions fp32 \
+  --device mps \
+  --warmup 2 --repeats 6 \
+  --output results/optimization_comparison.csv
 ```
 
-Open `notebooks/roofline_analysis.ipynb` to load the CSV, plot performance against input size, and create a Roofline plot. See `docs/metrics.md` for metric definitions and assumptions.
+Open `notebooks/roofline_analysis.ipynb` to load the optimization comparison CSV, plot performance against input size, and compare GEMM and fused multiply-add on a Roofline plot. See `docs/metrics.md` for metric definitions and assumptions.
 
 ## Measurement notes
 
-The initial arithmetic-intensity and bandwidth metrics use logical tensor traffic. They do not measure physical DRAM traffic, cache behavior, or achieved hardware utilization. The Roofline notebook therefore treats the values as estimates and labels the M2 Pro's published 200 GB/s unified-memory bandwidth as a theoretical reference ceiling. Benchmark results will vary with the exact M2 Pro configuration and system state.
+Arithmetic intensity and bandwidth use modeled traffic, not physical DRAM counters. The notebook uses the M2 Pro's published 200 GB/s unified-memory bandwidth as a reference ceiling and the best measured GEMM throughput as an empirical compute ceiling. Benchmark results vary with problem size, precision, and system state.
+
+Some naive GEMM points may appear above the 200 GB/s line because their modeled buffer reads can be served by GPU caches. This is a limit of the simple traffic model, not evidence of DRAM bandwidth above Apple's specification. The report should discuss these points as cache effects; hardware memory counters would be needed for a calibrated DRAM Roofline.
