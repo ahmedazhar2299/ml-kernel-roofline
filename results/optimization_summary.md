@@ -1,24 +1,37 @@
-# Initial optimization comparison
+# CPU and GPU GEMM comparison
 
-Measured on an Apple M2 Pro using FP32, with five warmup iterations and twenty timed repetitions per case. CPU measurements use PyTorch CPU operations. GPU measurements include PyTorch MPS and custom Metal kernels. The CSV contains all measured rows.
+Measured on an Apple M2 Pro using FP32, with five warmup iterations and twenty timed repetitions per case. CPU custom kernels are native C++ with multiple worker threads. GPU custom kernels are Metal. PyTorch provides library baselines on CPU and GPU. Raw measurements are in `optimization_comparison.csv`.
 
-| GEMM N | Naive Metal | Tiled Metal | PyTorch MPS | PyTorch CPU | Tiled speedup over naive |
-|---:|---:|---:|---:|---:|---:|
-| 128 | 0.525 ms | 0.206 ms | 0.216 ms | 0.006 ms | 2.55× |
-| 256 | 0.257 ms | 0.203 ms | 0.213 ms | 0.030 ms | 1.27× |
-| 512 | 0.876 ms | 0.566 ms | 0.258 ms | 0.124 ms | 1.55× |
-| 1024 | 6.251 ms | 3.526 ms | 0.666 ms | 0.808 ms | 1.77× |
+## CPU GEMM
 
-| Vector length | PyTorch CPU eager | PyTorch MPS eager | Fused Metal | Fused speedup over MPS eager |
+| N | Naive C++ | Tiled C++ | PyTorch CPU | Tiled speedup over naive |
 |---:|---:|---:|---:|---:|
-| 65,536 | 0.048 ms | 0.463 ms | 0.154 ms | 3.01× |
-| 262,144 | 0.091 ms | 0.493 ms | 0.167 ms | 2.95× |
-| 1,048,576 | 0.119 ms | 0.619 ms | 0.180 ms | 3.43× |
+| 128 | 0.417 ms | 0.137 ms | 0.006 ms | 3.05× |
+| 256 | 2.853 ms | 0.502 ms | 0.031 ms | 5.68× |
+| 512 | 28.947 ms | 3.474 ms | 0.205 ms | 8.33× |
+| 1024 | 223.532 ms | 23.976 ms | 0.788 ms | 9.32× |
 
-Tiled Metal GEMM was faster than the naive Metal version at all tested sizes. PyTorch's built-in GEMM was comparable to the tiled kernel for 128 and 256, and faster at 512 and 1024. The CPU PyTorch baseline was faster than the custom Metal GEMM at 128, 256, and 512; at 1024, PyTorch MPS was fastest.
+## GPU GEMM
 
-The fused Metal operation was about three times faster than two eager PyTorch MPS operations in these runs. CPU eager execution was faster than both GPU approaches for the tested vector sizes. Fusion reduced modeled traffic from six transfers per element to four, raising arithmetic intensity from 0.083 to 0.125 operations/byte.
+| N | Naive Metal | Tiled Metal | PyTorch GPU | Tiled speedup over naive |
+|---:|---:|---:|---:|---:|
+| 128 | 0.542 ms | 0.500 ms | 0.573 ms | 1.08× |
+| 256 | 0.508 ms | 0.365 ms | 0.195 ms | 1.39× |
+| 512 | 1.238 ms | 0.736 ms | 0.297 ms | 1.68× |
+| 1024 | 6.326 ms | 3.515 ms | 1.022 ms | 1.80× |
 
-The model places naive GEMM at about 0.25 operations/byte and tiled GEMM around 3.8 to 4.0 operations/byte. Tiling reuses values in threadgroup memory, reducing modeled global loads. PyTorch GEMM uses an idealized one-read-per-input estimate, so its arithmetic intensity is higher; it should not be interpreted as a measurement of PyTorch's physical memory traffic.
+Tiling improved the custom naive GEMM on both CPU and GPU. Its benefit increased with matrix size. PyTorch's tuned CPU and GPU kernels were substantially faster than our custom implementations at larger sizes.
 
-These are initial measurements, not final performance claims. Short workloads are sensitive to timer resolution, dispatch overhead, system load, and thermal state. The Roofline uses modeled traffic and a published 200 GB/s memory reference. Some naive GEMM points exceed that line because GPU caches can serve repeated buffer reads. A calibrated memory Roofline would require physical memory counters or a separate cache and streaming-bandwidth characterization.
+## Fused multiply-add
+
+| Vector length | PyTorch CPU eager | PyTorch GPU eager | Fused Metal | Metal speedup over GPU eager |
+|---:|---:|---:|---:|---:|
+| 65,536 | 0.065 ms | 0.460 ms | 0.160 ms | 2.87× |
+| 262,144 | 0.079 ms | 0.507 ms | 0.161 ms | 3.14× |
+| 1,048,576 | 0.113 ms | 0.332 ms | 0.199 ms | 1.67× |
+
+Fusion reduces modeled traffic from six transfers per element to four, raising arithmetic intensity from 0.083 to 0.125 operations/byte. The CPU eager implementation was fastest at these vector sizes. The fused Metal kernel was faster than two eager GPU operations in this run.
+
+The CPU naive and tiled kernels use the same number of worker threads for each size, up to ten workers. PyTorch used six CPU threads in this run. The CPU custom timing includes thread creation and join overhead on every repetition.
+
+Traffic values used for the Roofline plot are modeled, not hardware-counter readings. PyTorch GEMM uses idealized one-read-per-input traffic. Naive GEMM counts repeated buffer reads, some of which may be served by cache. This is why some points can appear above the published 200 GB/s memory-bandwidth reference. Treat the Roofline as an illustrative comparison, not a calibrated off-chip traffic model.

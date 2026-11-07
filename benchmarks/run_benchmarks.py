@@ -17,13 +17,15 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 METAL_SOURCE = ROOT / "benchmarks" / "MetalBench.swift"
 METAL_BINARY = ROOT / "build" / "metal_bench"
+CPU_SOURCE = ROOT / "benchmarks" / "CPUMatmul.cpp"
+CPU_BINARY = ROOT / "build" / "cpu_matmul"
 ELEMENTWISE_DEFAULTS = (1 << 16, 1 << 18, 1 << 20, 1 << 22)
 MATMUL_DEFAULTS = (128, 256, 512, 1024)
 DTYPES = {"fp32": torch.float32, "fp16": torch.float16}
 FIELDS = [
     "operation", "size", "device", "precision", "variant", "median_ms",
     "operations", "gflops", "modeled_bytes", "estimated_gb_per_s",
-    "arithmetic_intensity", "max_abs_error",
+    "arithmetic_intensity", "max_abs_error", "worker_threads",
 ]
 
 
@@ -92,6 +94,7 @@ def measure_torch(operation: str, size: int, device_label: str, device: torch.de
         "estimated_gb_per_s": modeled_bytes / seconds / 1e9,
         "arithmetic_intensity": operation_count / modeled_bytes,
         "max_abs_error": max_error,
+        "worker_threads": torch.get_num_threads() if device.type == "cpu" else 0,
     }
 
 
@@ -114,6 +117,31 @@ def measure_metal(cases: list[dict]) -> list[dict]:
         capture_output=True, check=True, cwd=ROOT,
     )
     return json.loads(result.stdout)
+
+
+def build_cpu_runner() -> None:
+    CPU_BINARY.parent.mkdir(parents=True, exist_ok=True)
+    if CPU_BINARY.exists() and CPU_BINARY.stat().st_mtime >= CPU_SOURCE.stat().st_mtime:
+        return
+    subprocess.run([
+        "clang++", "-O3", "-std=c++17", "-pthread", str(CPU_SOURCE),
+        "-o", str(CPU_BINARY),
+    ], check=True)
+
+
+def measure_cpu_kernels(cases: list[dict]) -> list[dict]:
+    if not cases:
+        return []
+    build_cpu_runner()
+    manifest = "".join(
+        f"{item['size']},{item['variant']},{item['warmup']},{item['repeats']}\n"
+        for item in cases
+    )
+    result = subprocess.run(
+        [str(CPU_BINARY)], input=manifest, text=True, capture_output=True,
+        check=True, cwd=ROOT,
+    )
+    return [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
 
 
 def main() -> None:
@@ -156,6 +184,7 @@ def main() -> None:
             print("MPS unavailable; running CPU benchmarks only.")
 
     rows = []
+    custom_cpu_cases = []
     custom_metal_cases = []
     for operation in operations:
         default_sizes = MATMUL_DEFAULTS if operation == "matmul" else ELEMENTWISE_DEFAULTS
@@ -191,11 +220,20 @@ def main() -> None:
                         custom_metal_cases.append(
                             {"operation": operation, "size": size, "variant": "metal_fused",
                              "warmup": args.warmup, "repeats": args.repeats})
+                if precision == "fp32" and operation == "matmul" and \
+                        "cpu" in [name for name, _ in devices]:
+                    custom_cpu_cases.extend([
+                        {"size": size, "variant": "naive", "warmup": args.warmup,
+                         "repeats": args.repeats},
+                        {"size": size, "variant": "tiled", "warmup": args.warmup,
+                         "repeats": args.repeats},
+                    ])
 
     try:
+        rows.extend(measure_cpu_kernels(custom_cpu_cases))
         rows.extend(measure_metal(custom_metal_cases))
     except (subprocess.CalledProcessError, FileNotFoundError) as error:
-        parser.error(f"could not build or run the Metal benchmark: {error}")
+        parser.error(f"could not build or run a native benchmark: {error}")
 
     rows.sort(key=lambda row: (row["operation"], row["size"], row["precision"],
                                row["device"], row["variant"]))
@@ -205,9 +243,10 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(rows)
     for row in rows:
+        thread_info = f", threads={row.get('worker_threads', 0)}" if row.get("worker_threads", 0) else ""
         print(f"{row['operation']:12s} n={row['size']:>8} {row['device']:8s} "
               f"{row['precision']} {row['variant']:12s} {row['median_ms']:.4f} ms, "
-              f"{row['gflops']:.3f} GFLOP/s")
+              f"{row['gflops']:.3f} GFLOP/s{thread_info}")
     print(f"Wrote {len(rows)} measurements to {args.output}")
 
 

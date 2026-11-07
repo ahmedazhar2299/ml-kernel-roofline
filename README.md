@@ -8,7 +8,7 @@ A microbenchmark suite for studying machine learning kernel performance on Apple
 - Elementwise addition
 - Elementwise multiplication
 
-The benchmark runner compares PyTorch CPU and MPS operations with custom Metal kernels. The Metal implementation includes a naive GEMM baseline, a 16×16 tiled GEMM, and a fused elementwise multiply-add kernel.
+The benchmark runner compares PyTorch CPU and GPU operations with native CPU and custom Metal kernels. The CPU implementation includes a parallel naive GEMM and a 32×32 cache-tiled GEMM. The Metal implementation includes a naive GEMM baseline, a 16×16 tiled GEMM, and a fused elementwise multiply-add kernel. The runner compiles its C++ and Swift helpers automatically with `clang++` and `swiftc`.
 
 FP16 support depends on the operation and device. Unsupported combinations are reported and skipped, so use the MPS device for the primary GPU FP16 comparison.
 

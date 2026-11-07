@@ -27,6 +27,7 @@ struct Measurement: Encodable {
     let estimated_gb_per_s: Double
     let arithmetic_intensity: Double
     let max_abs_error: Double
+    let worker_threads: Int
 }
 
 func fail(_ message: String) -> Never {
@@ -145,7 +146,8 @@ func runMatrixCase(_ item: BenchmarkCase, device: MTLDevice,
         variant: item.variant, median_ms: elapsed, operations: operations,
         gflops: Double(operations) / seconds / 1e9, modeled_bytes: bytes,
         estimated_gb_per_s: Double(bytes) / seconds / 1e9,
-        arithmetic_intensity: Double(operations) / Double(bytes), max_abs_error: error
+        arithmetic_intensity: Double(operations) / Double(bytes), max_abs_error: error,
+        worker_threads: 0
     )
 }
 
@@ -191,7 +193,8 @@ func runFusedCase(_ item: BenchmarkCase, device: MTLDevice,
         variant: "metal_fused", median_ms: elapsed, operations: operations,
         gflops: Double(operations) / seconds / 1e9, modeled_bytes: bytes,
         estimated_gb_per_s: Double(bytes) / seconds / 1e9,
-        arithmetic_intensity: Double(operations) / Double(bytes), max_abs_error: error
+        arithmetic_intensity: Double(operations) / Double(bytes), max_abs_error: error,
+        worker_threads: 0
     )
 }
 
