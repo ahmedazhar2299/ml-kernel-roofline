@@ -1,16 +1,18 @@
 # ML Kernel Roofline
 
-A microbenchmark suite for studying machine learning kernel performance on Apple M2 Pro. The initial scope compares matrix multiplication and elementwise operations across the CPU and Apple GPU, examines input-size and precision effects, and uses Roofline analysis to interpret the results.
+A microbenchmark suite for studying machine learning kernel performance on Apple M2 Pro. The initial scope compares matrix multiplication and elementwise operations across the CPU and Apple GPU, examines input-size effects, and uses Roofline analysis to interpret the results.
 
 ## Initial kernels
 
 - Matrix multiplication (GEMM)
 - Elementwise addition
 - Elementwise multiplication
+- Fused multiply-add
+- 2D convolution
+- Softmax
+- LayerNorm
 
-The benchmark runner compares PyTorch CPU and GPU operations with native CPU and custom Metal kernels. The CPU implementation includes a parallel naive GEMM and a 32×32 cache-tiled GEMM. The Metal implementation includes a naive GEMM baseline, a 16×16 tiled GEMM, and a fused elementwise multiply-add kernel. The runner compiles its C++ and Swift helpers automatically with `clang++` and `swiftc`.
-
-FP16 support depends on the operation and device. Unsupported combinations are reported and skipped, so use the MPS device for the primary GPU FP16 comparison.
+The benchmark runner compares PyTorch CPU and GPU operations with custom CPU and Metal kernels for GEMM, add, multiply, fused multiply-add, 2D convolution, softmax, and LayerNorm. Every operation has a naive and optimized custom CPU and Metal variant, alongside PyTorch baselines. GEMM's optimized path uses tiling; elementwise optimized paths process several values per iteration; fused multiply-add compares two separate operations against one fused pass. The benchmark currently uses FP32 for all implementations. The runner compiles its C++ and Swift helpers automatically with `clang++` and `swiftc`.
 
 ## Setup
 
@@ -30,7 +32,7 @@ Run CPU and MPS baselines, plus custom Metal kernels when MPS is available:
 python benchmarks/run_benchmarks.py --device both --output results/measurements.csv
 ```
 
-For a focused FP32 optimization comparison:
+For a focused kernel comparison:
 
 ```sh
 python benchmarks/run_benchmarks.py \
@@ -43,10 +45,8 @@ python benchmarks/run_benchmarks.py \
   --output results/optimization_comparison.csv
 ```
 
-Open `notebooks/roofline_analysis.ipynb` to load the optimization comparison CSV, plot performance against input size, and compare GEMM and fused multiply-add on a Roofline plot. See `docs/metrics.md` for metric definitions and assumptions.
+Open `notebooks/roofline_analysis.ipynb` to select a kernel. `SHOW_NAIVE`, `SHOW_OPTIMIZED`, and `SHOW_PYTORCH` control which implementations appear. The comparison currently uses FP32. See `docs/metrics.md` for metric definitions and assumptions.
 
 ## Measurement notes
 
-Arithmetic intensity and bandwidth use modeled traffic, not physical DRAM counters. The notebook uses the M2 Pro's published 200 GB/s unified-memory bandwidth as a reference ceiling and the best measured GEMM throughput as an empirical compute ceiling. Benchmark results vary with problem size, precision, and system state.
-
-Some naive GEMM points may appear above the 200 GB/s line because their modeled buffer reads can be served by GPU caches. This is a limit of the simple traffic model, not evidence of DRAM bandwidth above Apple's specification. The report should discuss these points as cache effects; hardware memory counters would be needed for a calibrated DRAM Roofline.
+The benchmark's per-kernel traffic estimates are models, not physical DRAM counters. For GEMM, the notebook plots arithmetic intensity from compulsory input/output tensor traffic so it is comparable to the M2 Pro's published 200 GB/s unified-memory bandwidth reference. Its compute ceiling is the best measured GEMM throughput for the selected device and precision. The plot remains illustrative because it combines modeled traffic, published bandwidth, and an empirical compute ceiling. Benchmark results vary with problem size, precision, and system state.
